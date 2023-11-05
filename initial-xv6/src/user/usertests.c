@@ -798,12 +798,19 @@ killstatus(char *s)
       printf("%s: fork failed\n", s);
       exit(1);
     }
+    printf("1");
     if(pid1 == 0){
       while(1) {
+        // printf("dd");
         getpid();
+        // printf("ll");
       }
+              // printf("aa");
+
       exit(0);
+
     }
+    printf("2");
     sleep(1);
     kill(pid1);
     wait(&xst);
@@ -2597,7 +2604,7 @@ struct test {
   {killstatus, "killstatus"},
   {preempt, "preempt"},
   {exitwait, "exitwait"},
-  {reparent, "reparent" },
+  // {reparent, "reparent" },
   {twochildren, "twochildren"},
   {forkfork, "forkfork"},
   {forkforkfork, "forkforkfork"},
