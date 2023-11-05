@@ -126,7 +126,16 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
-
+  p->rtime = 0;
+  p->ctime = ticks;
+  p->etime = 0;
+  p->wtime = 0;
+  p->stime = 0;
+  p->actualrunning=0;
+  p->priority = 50;
+  // p->niceness = 5;
+  p->rbi = 25;
+  p->queue = 0;
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -458,6 +467,20 @@ int wait(uint64 addr)
 //  - swtch to start running that process.
 //  - eventually that process transfers control
 //    via swtch back to the scheduler.
+int min(int a, int b)
+{
+  if (a < b)
+    return a;
+  return b;
+}
+int maxi(int a, int b)
+{
+  if (a > b)
+    return a;
+  return b;
+}
+
+#ifdef RR
 void scheduler(void)
 {
   struct proc *p;
@@ -477,6 +500,7 @@ void scheduler(void)
         // Switch to chosen process.  It is the process's job
         // to release its lock and then reacquire it
         // before jumping back to us.
+        // printf("rtime iddds %d\n", p->rtime);
         p->state = RUNNING;
         c->proc = p;
         swtch(&c->context, &p->context);
@@ -489,6 +513,85 @@ void scheduler(void)
     }
   }
 }
+#endif
+#ifdef MPBS
+void scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = mycpu();
+  c->proc = 0;
+  printf("PBS is running");
+  for (;;)
+  {
+    // Avoid deadlock by ensuring that devices can interrupt.
+    intr_on();
+    struct proc *max = 0;
+    for (p = proc; p < &proc[NPROC]; p++)
+    {
+      acquire(&p->lock);
+      if (p->state == RUNNABLE)
+      {
+        // printf("rtime isddd %d\n", p->rtime);
+        // printf("wtime is %d\n", p->wtime);
+        // printf("stime is %d\n", p->stime);
+        int num = (3 * p->rtime - p->stime - p->wtime) * 50;
+        // printf("num is %d\n", num);
+        int den = ( (p->rtime + p->stime + p->wtime + 1));
+        // printf("den is %d\n", den);
+        int fraction ;
+        fraction = num / den;
+        // printf("fraction is %d\n", fraction);
+        p->rbi = maxi(fraction , 0);
+        p->Dpriority = min(p->priority + p->rbi, 100);
+        if (max == 0)
+        {
+          max = p;
+          continue;
+        }
+        if (max->Dpriority > p->Dpriority)
+        {
+          release(&max->lock);
+          max = p;
+          continue;
+        }
+        else if (p->Dpriority == max->Dpriority)
+        {
+          if (p->timesscheduled < max->timesscheduled)
+          {
+            release(&max->lock);
+            max = p;
+            continue;
+          }
+          else if (p->timesscheduled == max->timesscheduled)
+          {
+            if (p->ctime < max->ctime)
+            {
+              release(&max->lock);
+              max = p;
+              continue;
+            }
+          }
+        }
+      }
+      release(&p->lock);
+    }      
+    // printf("rtime is %d\n", max->rtime);
+
+    if (max != 0)
+    {
+      // printf("rtime is %d\n", max->rtime);
+      max->stime = 0;
+      max->rtime = 0;
+      max->state = RUNNING;
+      c->proc = max;
+      swtch(&c->context, &max->context);
+      c->proc = 0;
+      release(&max->lock);
+    }
+  }
+}
+#endif
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -729,6 +832,7 @@ int waitx(uint64 addr, uint *wtime, uint *rtime)
           // Found one.
           pid = np->pid;
           *rtime = np->rtime;
+          // printf("rtime is %d\n", *rtime);
           *wtime = np->etime - np->ctime - np->rtime;
           if (addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
                                    sizeof(np->xstate)) < 0)
@@ -758,6 +862,30 @@ int waitx(uint64 addr, uint *wtime, uint *rtime)
   }
 }
 
+int set_priority(int pid, int new_priority)
+{
+  struct proc *select;
+  struct proc *p;
+  // printf("%d\n",pid);
+  for (p = proc; p < &proc[NPROC]; p++)
+  {
+    acquire(&p->lock);
+    if(p->pid== pid)
+    {
+      select = p;
+      break;
+    }
+    select = p;
+    release(&p->lock);
+  }
+  // printf("rtim is %d\n",select->rtime);
+  int oldpriority=select->priority;
+  select->priority = new_priority;
+  select->rbi=25;
+  release(&select->lock);
+  return oldpriority;
+}
+
 void update_time()
 {
   struct proc *p;
@@ -766,7 +894,17 @@ void update_time()
     acquire(&p->lock);
     if (p->state == RUNNING)
     {
+      // printf("running");
       p->rtime++;
+      p->actualrunning++;
+      // printf("rtime is %d\n", p->rtime);
+    }
+    else if ( p-> state == RUNNABLE)
+    {
+      p->wtime++;
+    } else if ( p-> state == SLEEPING)
+    {
+      p->stime++;
     }
     release(&p->lock);
   }

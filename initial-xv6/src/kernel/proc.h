@@ -103,7 +103,14 @@ struct proc
   int killed;           // If non-zero, have been killed
   int xstate;           // Exit status to be returned to parent's wait
   int pid;              // Process ID
-
+  int priority;
+  int niceness;
+  int rbi;
+  int Dpriority;
+  int queue;
+  int timesscheduled;
+  uint64 wtime;
+  uint64 stime;
   // wait_lock must be held when using this:
   struct proc *parent; // Parent process
 
@@ -116,9 +123,10 @@ struct proc
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
-  uint rtime;                  // How long the process ran for
-  uint ctime;                  // When was the process created
-  uint etime;                  // When did the process exited
+  uint64 rtime;                  // How long the process ran for
+  uint64 ctime;                  // When was the process created
+  uint64 etime;                  // When did the process exited
+  uint64 actualrunning;
 };
 
 extern struct proc proc[NPROC];

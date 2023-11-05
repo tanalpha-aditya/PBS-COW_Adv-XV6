@@ -16,6 +16,42 @@ void kernelvec();
 
 extern int devintr();
 
+int page_fault_handler(void *virtualADDR, pagetable_t pt)
+{
+
+  struct proc *p = myproc();
+  if ((uint64)virtualADDR >= MAXVA || ((uint64)virtualADDR >= PGROUNDDOWN(p->trapframe->sp) - PGSIZE && (uint64)virtualADDR <= PGROUNDDOWN(p->trapframe->sp)))
+  {
+    return -1;
+  }
+
+  virtualADDR = (void *)PGROUNDDOWN((uint64)virtualADDR);
+  pte_t *pte = walk(pt, (uint64)virtualADDR, 0);
+  if (!pte)
+    return -1;
+  uint flagsVAR = PTE_FLAGS(*pte);
+  int flagComparison = flagsVAR & PTE_C;
+  uint64 physicalADDR = PTE2PA(*pte);
+
+  if (!flagComparison || !physicalADDR)
+    return -1;
+  if (flagComparison)
+  {
+    flagsVAR = (flagsVAR | PTE_W) & (~PTE_C);
+    char *mem;
+    mem = kalloc();
+    if (mem == 0)
+    {
+      return -1;
+    }
+    memmove(mem, (void *)physicalADDR, PGSIZE);
+    *pte = PA2PTE(mem) | flagsVAR;
+    kfree((void *)physicalADDR);
+    return 0;
+  }
+  return 0;
+}
+
 void trapinit(void)
 {
   initlock(&tickslock, "time");
@@ -68,6 +104,12 @@ void usertrap(void)
   {
     // ok
   }
+  else if (r_scause() == 15 || r_scause() == 13)
+  {
+    int res = page_fault_handler((void *)r_stval(), p->pagetable);
+    if (res == -2 || res == -1)
+      p->killed = 1;
+  }
   else
   {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
@@ -80,7 +122,10 @@ void usertrap(void)
 
   // give up the CPU if this is a timer interrupt.
   if (which_dev == 2)
+// #ifdef RR
+
     yield();
+// #endif
 
   usertrapret();
 }
@@ -151,10 +196,15 @@ void kerneltrap()
     panic("kerneltrap");
   }
 
-  // give up the CPU if this is a timer interrupt.
-  if (which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
-    yield();
+// give up the CPU if this is a timer interrupt.
+// #ifdef RR
+  if (which_dev == 2)
+  {
+    if (myproc() != 0 && myproc()->state == RUNNING)
+      yield();
+  }
 
+// #endif
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
   w_sepc(sepc);

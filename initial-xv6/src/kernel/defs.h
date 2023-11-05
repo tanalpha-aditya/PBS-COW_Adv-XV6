@@ -106,6 +106,7 @@ void            yield(void);
 int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
+int             set_priority(int pid, int priority);
 
 // swtch.S
 void            swtch(struct context*, struct context*);
@@ -147,6 +148,7 @@ void            trapinit(void);
 void            trapinithart(void);
 extern struct spinlock tickslock;
 void            usertrapret(void);
+int             page_fault_handler(void*, pagetable_t);
 
 // uart.c
 void            uartinit(void);
@@ -191,3 +193,9 @@ void            update_time(void);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))
+
+//  cow implentation
+
+void            dec_page_ref(void*);
+void            inc_page_ref(void*);
+int             get_page_ref(void*);

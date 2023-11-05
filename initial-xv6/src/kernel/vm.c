@@ -307,8 +307,8 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
   pte_t *pte;
   uint64 pa, i;
-  uint flags;
-  char *mem;
+  uint flagsVar;
+  // char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -316,14 +316,20 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
-    flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    flagsVar = PTE_FLAGS(*pte);
+    if(flagsVar & PTE_W){
+      flagsVar = (flagsVar & (~PTE_W))|PTE_C;
+      *pte = PA2PTE(pa) | flagsVar;
+    }
+    // if((mem = kalloc()) == 0)
+    //   goto err;
+    // memmove(mem, (char*)pa, PGSIZE);
+    // if(mappages(new, i, PGSIZE, (uint64)mem, flagsVar) != 0){
+    //   kfree(mem);
+    if(mappages(new, i, PGSIZE, pa, flagsVar) != 0){
       goto err;
     }
+    inc_page_ref((void*)pa);
   }
   return 0;
 
@@ -349,26 +355,45 @@ uvmclear(pagetable_t pagetable, uint64 va)
 // Copy len bytes from src to virtual address dstva in a given page table.
 // Return 0 on success, -1 on error.
 int
-copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
+copyout(pagetable_t pt, uint64 dstva, char *src, uint64 x)
 {
-  uint64 n, va0, pa0;
+  uint64 n;
+  uint64 roundedAddr;
+  uint64 flagsVar;
+  uint64 physicalAddr;
+  
+  while(x)
+  {
+    roundedAddr = PGROUNDDOWN(dstva);
 
-  while(len > 0){
-    va0 = PGROUNDDOWN(dstva);
-    pa0 = walkaddr(pagetable, va0);
-    if(pa0 == 0)
-      return -1;
-    n = PGSIZE - (dstva - va0);
-    if(n > len)
-      n = len;
-    memmove((void *)(pa0 + (dstva - va0)), src, n);
+    physicalAddr = walkaddr(pt, roundedAddr);
+    if(!physicalAddr) return -1;
 
-    len -= n;
+
+    pte_t *pte = walk(pt, roundedAddr, 0);
+    flagsVar = PTE_FLAGS(*pte);
+    uint64 flagComparison = flagsVar & PTE_C;
+    
+    if(flagComparison){
+      page_fault_handler((void*)roundedAddr, pt);
+
+
+      physicalAddr = walkaddr(pt, roundedAddr);
+    }
+    n = PGSIZE - (dstva - roundedAddr);
+    if(x < n)
+      n = x;
+    memmove((void *)(dstva - roundedAddr + physicalAddr), src, n);
+
     src += n;
-    dstva = va0 + PGSIZE;
+    dstva = roundedAddr + PGSIZE;
+    x -= n;
+    
+    
   }
   return 0;
 }
+
 
 // Copy from user to kernel.
 // Copy len bytes to dst from virtual address srcva in a given page table.
